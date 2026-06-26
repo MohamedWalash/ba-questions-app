@@ -1,4 +1,6 @@
 streamlit
 pandas
-easyocr
+paddlepaddle-tiny
+paddleocr
+pillow
 numpy
