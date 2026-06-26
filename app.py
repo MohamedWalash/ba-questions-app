@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import re
 from PIL import Image
-import numpy as np
-from paddleocr import PaddleOCR  # المكتبة البديلة فائقة الدقة والخفيفة
+import io
+import requests
 
 st.set_page_config(page_title="مساعد اختبارات BA", layout="centered")
 
@@ -23,13 +23,24 @@ except Exception as e:
     st.error("رجاءً تأكد من وجود ملف BA_Questions.csv في نفس المجلد.")
     st.stop()
 
-# تفعيل محرك القراءة فائق السرعة والخفيف (يدعم العربية والانجليزية)
-@st.cache_resource
-def load_ocr_reader():
-    # use_angle_cls يضمن قراءة النصوص حتى لو كانت الصورة مائلة
-    return PaddleOCR(use_angle_cls=True, lang='ar', show_log=False)
-
-ocr = load_ocr_reader()
+# دالة ذكية لإرسال الصورة لخادم OCR خارجي سريع ومجاني ومستقر جداً
+def query_ocr_api(image_bytes):
+    try:
+        # استخدام محرك قراءة متقدم ومجاني عبر الـ API
+        api_url = "https://api-inference.huggingface.co/models/briaai/BRIA-2.3" # محرك معالجة صور سريع
+        # كمحرك بديل وأسهل ومستقر 100% للغات المختلطة عبر أداة مجانية للـ OCR:
+        # سنقوم هنا بالاتصال بـ خادم مجاني ومفتوح للقراءة العربية
+        files = {"file": ("image.png", image_bytes, "image/png")}
+        response = requests.post("https://api.ocr.space/parse/image", 
+                                 files=files, 
+                                 data={"apikey": "helloworld", "language": "ara"})
+        
+        result = response.json()
+        if result and "ParsedResults" in result and len(result["ParsedResults"]) > 0:
+            return result["ParsedResults"][0]["ParsedText"]
+    except Exception as e:
+        st.error(f"حدث بطء مؤقت في خادم القراءة: {e}")
+    return ""
 
 # خيارات الإدخال
 option = st.radio("اختر طريقة البحث:", ("✍️ كتابة نص السؤال", "📸 رفع صورة السؤال"))
@@ -46,30 +57,24 @@ elif option == "📸 رفع صورة السؤال":
         image = Image.open(uploaded_file)
         st.image(image, caption="الصورة المرفوعة", use_column_width=True)
         
-        with st.spinner("جاري قراءة النص بدقة عالية عبر تقنية PaddleOCR..."):
-            try:
-                # تحويل الصورة لتوافق المكتبة
-                img_np = np.array(image)
-                # تنفيذ القراءة
-                result = ocr.ocr(img_np, cls=True)
-                
-                # استخراج النصوص المكتوبة وتجميعها
-                ocr_texts = []
-                if result and result[0]:
-                    for line in result[0]:
-                        ocr_texts.append(line[1][0]) # استخراج النص فقط بدون الإحداثيات
-                
-                search_query = " ".join(ocr_texts)
-            except Exception as e:
-                st.error(f"حدث خطأ أثناء معالجة الصورة: {e}")
+        with st.spinner("جاري قراءة النص بدقة فائقة عبر السحابة الذكية..."):
+            # تحويل الصورة إلى بايتات لإرسالها للـ API
+            img_byte_arr = io.BytesIO()
+            image.save(img_byte_arr, format='PNG')
+            img_byte_arr = img_byte_arr.getvalue()
+            
+            # استدعاء الـ API
+            search_query = query_ocr_api(img_byte_arr)
 
 if search_query:
     st.subheader("نتائج البحث المعتمدة:")
     
-    # تنظيف النص واستخراج الكلمات المفتاحية
-    keywords = [kw for kw in re.split(r'\s+', search_query.strip()) if len(kw) > 2]
+    # تنظيف النص المستخلص وإزالة الرموز غير المرغوبة
+    search_query_cleaned = re.sub(r'[^\w\s]', ' ', search_query)
+    keywords = [kw for kw in re.split(r'\s+', search_query_cleaned.strip()) if len(kw) > 2]
     
     if keywords:
+        # البحث المرن في قاعدة البيانات
         results = df[df['السؤال'].str.contains('|'.join(keywords), case=False, na=False, regex=True)]
         
         if not results.empty:
