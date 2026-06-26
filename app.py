@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from PIL import Image
 import numpy as np
-import easyocr  # المكتبة البديلة والأقوى للعربية
+from paddleocr import PaddleOCR  # المكتبة البديلة فائقة الدقة والخفيفة
 
 st.set_page_config(page_title="مساعد اختبارات BA", layout="centered")
 
@@ -23,13 +23,13 @@ except Exception as e:
     st.error("رجاءً تأكد من وجود ملف BA_Questions.csv في نفس المجلد.")
     st.stop()
 
-# تفعيل قارئ النصوص الذكي للعربية والانجليزية
+# تفعيل محرك القراءة فائق السرعة والخفيف (يدعم العربية والانجليزية)
 @st.cache_resource
 def load_ocr_reader():
-    # تحميل النموذج في الذاكرة لتسريع العمليات اللاحقة
-    return easyocr.Reader(['ar', 'en'], gpu=False)
+    # use_angle_cls يضمن قراءة النصوص حتى لو كانت الصورة مائلة
+    return PaddleOCR(use_angle_cls=True, lang='ar', show_log=False)
 
-reader = load_ocr_reader()
+ocr = load_ocr_reader()
 
 # خيارات الإدخال
 option = st.radio("اختر طريقة البحث:", ("✍️ كتابة نص السؤال", "📸 رفع صورة السؤال"))
@@ -46,25 +46,30 @@ elif option == "📸 رفع صورة السؤال":
         image = Image.open(uploaded_file)
         st.image(image, caption="الصورة المرفوعة", use_column_width=True)
         
-        with st.spinner("جاري قراءة النص من الصورة بتقنية الذكاء الاصطناعي..."):
+        with st.spinner("جاري قراءة النص بدقة عالية عبر تقنية PaddleOCR..."):
             try:
-                # تحويل الصورة إلى مصفوفة رقمية توافق مكتبة EasyOCR
+                # تحويل الصورة لتوافق المكتبة
                 img_np = np.array(image)
-                # قراءة النص
-                ocr_results = reader.readtext(img_np, detail=0)
-                # تجميع النصوص المقروءة في نص واحد
-                search_query = " ".join(ocr_results)
+                # تنفيذ القراءة
+                result = ocr.ocr(img_np, cls=True)
+                
+                # استخراج النصوص المكتوبة وتجميعها
+                ocr_texts = []
+                if result and result[0]:
+                    for line in result[0]:
+                        ocr_texts.append(line[1][0]) # استخراج النص فقط بدون الإحداثيات
+                
+                search_query = " ".join(ocr_texts)
             except Exception as e:
                 st.error(f"حدث خطأ أثناء معالجة الصورة: {e}")
 
 if search_query:
     st.subheader("نتائج البحث المعتمدة:")
     
-    # تنظيف النص واستخراج الكلمات المفتاحية الأساسية (تجاهل الحروف والكلمات الصغيرة جداً)
+    # تنظيف النص واستخراج الكلمات المفتاحية
     keywords = [kw for kw in re.split(r'\s+', search_query.strip()) if len(kw) > 2]
     
     if keywords:
-        # البحث المرن في قاعدة البيانات
         results = df[df['السؤال'].str.contains('|'.join(keywords), case=False, na=False, regex=True)]
         
         if not results.empty:
